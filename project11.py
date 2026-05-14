@@ -1,17 +1,10 @@
-#!/usr/bin/env python3
-"""
-Парсер Google Calendar API - версия без библиотеки typing (Python 3.10+)
-"""
-
 import datetime
 import os.path
 import pickle
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
-# Конфигурация
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 WORK_START_HOUR, WORK_END_HOUR = 10, 22
 MIN_FREE_INTERVAL = 60  # минут
@@ -22,7 +15,7 @@ SHOW_DATES = False
 # 'two_weeks' - общие окна на двух неделях (текущая и следующая)
 SCHEDULE_MODE = 'two_weeks'  
 
-# АУТЕНТИФИКАЦИЯ 
+
 def get_credentials():
     creds = None
     if os.path.exists('token.pickle'):
@@ -43,16 +36,15 @@ def get_credentials():
             pickle.dump(creds, token)
     return creds
 
-#  ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ 
 def parse_time(dt_str: str, tz_info) -> datetime.datetime:
-    """Парсит время из строки Google Calendar"""
+    "Парсит время из строки Google Calendar"
     if dt_str.endswith('Z'):
         dt_str = dt_str[:-1] + '+00:00'
     dt = datetime.datetime.fromisoformat(dt_str)
     return dt.astimezone(tz_info) if dt.tzinfo else dt.replace(tzinfo=datetime.timezone.utc).astimezone(tz_info)
 
 def get_week_range(week_offset: int = 0) -> tuple[datetime.datetime, datetime.datetime]:
-    """Возвращает начало и конец недели со смещением"""
+    "Возвращает начало и конец недели со смещением"
     now = datetime.datetime.now().astimezone()
     start = now - datetime.timedelta(days=now.weekday())
     start = start.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -60,23 +52,20 @@ def get_week_range(week_offset: int = 0) -> tuple[datetime.datetime, datetime.da
     return start, start + datetime.timedelta(days=7)
 
 def get_events(service, calendar_id: str, start: datetime.datetime, end: datetime.datetime) -> list[dict]:
-    """Получает события за период"""
-    try:
-        result = service.events().list(
-            calendarId=calendar_id,
-            timeMin=start.astimezone(datetime.timezone.utc).isoformat(),
-            timeMax=end.astimezone(datetime.timezone.utc).isoformat(),
-            singleEvents=True, orderBy='startTime'
-        ).execute()
-        
-        return result.get('items', [])
-    except HttpError as e:
-        print(f'Ошибка: {e}')
-        return []
+    "Получает события за период"
+    result = service.events().list(
+        calendarId=calendar_id,
+        timeMin=start.astimezone(datetime.timezone.utc).isoformat(),
+        timeMax=end.astimezone(datetime.timezone.utc).isoformat(),
+        singleEvents=True, orderBy='startTime'
+    ).execute()
+    
+    return result.get('items', [])
+
 
 #  ОБРАБОТКА ИНТЕРВАЛОВ 
 def get_busy_intervals(events: list[dict], tz_info) -> list[tuple[datetime.datetime, datetime.datetime]]:
-    """Извлекает занятые интервалы из событий"""
+    "Извлекает занятые интервалы из событий"
     intervals = []
     for event in events:
         start, end = event.get('start', {}), event.get('end', {})
@@ -95,7 +84,7 @@ def get_busy_intervals(events: list[dict], tz_info) -> list[tuple[datetime.datet
     return intervals
 
 def merge_intervals(intervals: list[tuple]) -> list[list]:
-    """Объединяет пересекающиеся интервалы"""
+    "Объединяет пересекающиеся интервалы"
     if not intervals:
         return []
     intervals.sort()
@@ -109,7 +98,7 @@ def merge_intervals(intervals: list[tuple]) -> list[list]:
 
 def get_free_intervals(day_start: datetime.datetime, day_end: datetime.datetime, 
                        busy: list[list], min_minutes: int) -> list[tuple]:
-    """Вычисляет свободные интервалы"""
+    "Вычисляет свободные интервалы"
     free = []
     if not busy:
         free = [(day_start, day_end)]
@@ -127,13 +116,13 @@ def get_free_intervals(day_start: datetime.datetime, day_end: datetime.datetime,
 
 #  ВЫВОД 
 def format_interval(start: datetime.datetime, end: datetime.datetime) -> str:
-    """Форматирует интервал без указания длительности"""
+    "Форматирует интервал без указания длительности"
     if start.strftime('%H:%M') == f"{WORK_START_HOUR:02d}:00" and end.strftime('%H:%M') == f"{WORK_END_HOUR:02d}:00":
         return "Весь день"
     return f"{start.strftime('%H:%M')}-{end.strftime('%H:%M')}"
 
 def print_weekly_schedule(free_by_day: dict[int, list], week_start: datetime.datetime, title: str):
-    """Выводит расписание на неделю"""
+    "Выводит расписание на неделю"
     day_names = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
     print(f"\n{title}")
     print("=" * 70)
@@ -156,7 +145,7 @@ def print_weekly_schedule(free_by_day: dict[int, list], week_start: datetime.dat
 
 #  ОСНОВНЫЕ ФУНКЦИИ 
 def get_week_schedule(service, calendar_id: str, week_offset: int = 0) -> dict[int, list]:
-    """Возвращает расписание на указанную неделю"""
+    "Возвращает расписание на указанную неделю"
     week_start, week_end = get_week_range(week_offset)
     events = get_events(service, calendar_id, week_start, week_end)
     tz_info = datetime.datetime.now().astimezone().tzinfo
@@ -167,7 +156,7 @@ def get_week_schedule(service, calendar_id: str, week_offset: int = 0) -> dict[i
             day = start.weekday()
             busy_by_day[day].append((start, end))
     
-    # Объединяем интервалы и вычисляем свободные
+    # Объединяем интервалы и ищем свободные
     free_by_day = {}
     for day in range(7):
         day_date = week_start + datetime.timedelta(days=day)
@@ -182,9 +171,7 @@ def get_week_schedule(service, calendar_id: str, week_offset: int = 0) -> dict[i
     return free_by_day
 
 def find_common_windows_next_and_two_ahead(service, calendar_id: str) -> dict[int, list]:
-    """
-    Находит общие свободные окна на следующей неделе и через одну.
-    """
+    "Находит общие свободные окна на следующей неделе и через одну."
     week_next = get_week_schedule(service, calendar_id, 1)   # Следующая неделя
     week_two = get_week_schedule(service, calendar_id, 2)    # Через одну неделю
     
@@ -204,7 +191,7 @@ def find_common_windows_next_and_two_ahead(service, calendar_id: str) -> dict[in
                         duration = (datetime.datetime.combine(datetime.date.today(), intersect_end) - 
                                   datetime.datetime.combine(datetime.date.today(), intersect_start)).total_seconds() / 60
                         if duration >= MIN_FREE_INTERVAL:
-                            # Создаем интервал с датой из первой недели
+                            # Создаем интервал из первой недели
                             common_start = s1.replace(hour=intersect_start.hour, minute=intersect_start.minute)
                             common_end = s1.replace(hour=intersect_end.hour, minute=intersect_end.minute)
                             intersections.append((common_start, common_end))
@@ -214,33 +201,26 @@ def find_common_windows_next_and_two_ahead(service, calendar_id: str) -> dict[in
     
     return common
 
-#  ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОТОБРАЖЕНИЯ 
 def display_events(events: list[dict], calendar_name: str):
-    """Отображает события"""
+    "Отображает события"
     if not events:
         print(f"\nВ календаре '{calendar_name}' нет событий")
         return
     
-    print(f"\n{'='*70}\n📅 {calendar_name} | {len(events)} событий\n{'='*70}")
+    print(f"\n{'='*70}\n {calendar_name} | {len(events)} событий\n{'='*70}")
     for i, e in enumerate(events, 1):
         start = e.get('start', {})
         time_str = parse_time(start['dateTime'], datetime.timezone.utc).strftime('%d.%m.%Y %H:%M') if 'dateTime' in start else start.get('date', 'Дата не указана')
         print(f"{i}. {e.get('summary', 'Без названия')}")
-        print(f"{time_str}")
-        print(f"{e.get('location', 'Не указано')}")
+        print(f"Начало: {time_str}")
         if e.get('description'):
-            print(f"{e.get('description')[:100]}...")
+            print(f"Описание: {e.get('description')[:100]}")
         print(f"{'─'*50}")
 
 def get_all_calendars(service) -> list[dict]:
-    """Получает все календари"""
-    try:
-        return service.calendarList().list().execute().get('items', [])
-    except HttpError as e:
-        print(f'Ошибка: {e}')
-        return []
+    "Получает все календари"
+    return service.calendarList().list().execute().get('items', [])
 
-#  MAIN 
 def main():
     print(f"Запуск парсера | Мин. интервал: {MIN_FREE_INTERVAL} мин")
     print(f"Режим: {'Общие окна на двух неделях' if SCHEDULE_MODE == 'two_weeks' else 'Только следующая неделя'}")
@@ -248,7 +228,7 @@ def main():
     try:
         creds = get_credentials()
         service = build('calendar', 'v3', credentials=creds)
-        print("Подключено к Google Calendar API")
+        print("Подключено")
         
         calendars = get_all_calendars(service)
         if not calendars:
@@ -276,12 +256,12 @@ def main():
         cal_name = selected.get('summary', 'Календарь')
         cal_id = selected.get('id')
         
-        # Показываем события (только на месяц вперед)
+        # Показываем события
         week_start, _ = get_week_range(0)
         events = get_events(service, cal_id, week_start, week_start + datetime.timedelta(days=30))
         display_events(events[:15], cal_name)
         
-        # Выводим расписание в зависимости от режима
+        # Выводим расписание
         if SCHEDULE_MODE == 'next':
             # Только следующая неделя
             week_start_next, _ = get_week_range(1)
@@ -303,12 +283,8 @@ def main():
                 )
             else:
                 print(f"\n Нет общих окон длительностью {MIN_FREE_INTERVAL}+ минут на двух неделях")
-    
-    except FileNotFoundError as e:
-        print(f"\n {e}\nСкачайте credentials.json из Google Cloud Console")
     except Exception as e:
         print(f"\n Ошибка: {e}")
-        raise
 
 if __name__ == '__main__':
     main()
