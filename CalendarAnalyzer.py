@@ -1,4 +1,5 @@
 import datetime
+import calendar
 import os.path
 import pickle
 from google.auth.transport.requests import Request
@@ -13,7 +14,11 @@ SHOW_DATES = False
 # Режим отображения расписания:
 # 'next' - только следующая неделя
 # 'two_weeks' - общие окна на двух неделях (текущая и следующая)
-SCHEDULE_MODE = 'two_weeks'  
+# False - не считать окна
+SCHEDULE_MODE = False
+
+# Подсчет месячной зп
+MUNTH_SUM = True
 
 
 def get_credentials():
@@ -22,7 +27,7 @@ def get_credentials():
         with open('token.pickle', 'rb') as token:
             creds = pickle.load(token)
 
-    path = 'client_secret_1044780173531-9n79dtbhfs2tthk6b555mtgt3gua92gf.apps.googleusercontent.com.json'
+    path = 'credentials.json'
     
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -50,6 +55,32 @@ def get_week_range(week_offset: int = 0) -> tuple[datetime.datetime, datetime.da
     start = start.replace(hour=0, minute=0, second=0, microsecond=0)
     start += datetime.timedelta(weeks=week_offset)
     return start, start + datetime.timedelta(days=7)
+
+def get_month_range(month_offset: int = 0) -> tuple[datetime.datetime, datetime.datetime]:
+    """Возвращает начало и конец месяца со смещением"""
+    now = datetime.datetime.now().astimezone()
+    
+    # Определяем год и месяц с учетом смещения
+    year = now.year
+    month = now.month + month_offset
+    
+    # Корректируем год и месяц, если месяц вышел за пределы 1-12
+    while month < 1:
+        month += 12
+        year -= 1
+    while month > 12:
+        month -= 12
+        year += 1
+    
+    # Начало месяца: 1 число, 00:00:00
+    start = datetime.datetime(year, month, 1, 0, 0, 0, 0, tzinfo=now.tzinfo)
+    
+    # Конец месяца: последний день месяца, 23:59:59.999999
+    # Получаем количество дней в месяце
+    last_day = calendar.monthrange(year, month)[1]
+    end = datetime.datetime(year, month, last_day, 23, 59, 59, 999999, tzinfo=now.tzinfo)
+    
+    return start, end, month
 
 def get_events(service, calendar_id: str, start: datetime.datetime, end: datetime.datetime) -> list[dict]:
     "Получает события за период"
@@ -203,10 +234,7 @@ def find_common_windows_next_and_two_ahead(service, calendar_id: str) -> dict[in
 
 def display_events(events: list[dict], calendar_name: str):
     "Отображает события"
-    if not events:
-        print(f"\nВ календаре '{calendar_name}' нет событий")
-        return
-    
+        
     print(f"\n{'='*70}\n {calendar_name} | {len(events)} событий\n{'='*70}")
     for i, e in enumerate(events, 1):
         start = e.get('start', {})
@@ -216,6 +244,20 @@ def display_events(events: list[dict], calendar_name: str):
         if e.get('description'):
             print(f"Описание: {e.get('description')[:100]}")
         print(f"{'─'*50}")
+
+def salary(events: list[dict]):
+    "Считает зарплату"    
+    salary = 0
+    
+    for i, event in enumerate(events, 1):
+        if event.get('description'):
+            try:
+                salary += int(event.get('description'))
+            except Exception as e:
+                print(event.get('description'))
+                print(f"\n Ошибка: {e}")
+    return salary
+
 
 def get_all_calendars(service) -> list[dict]:
     "Получает все календари"
@@ -248,10 +290,7 @@ def main():
         if not selected:
              # Фолбэк, если календарь 'Домашний' не найден
             selected = calendars[0] if calendars else None
-            
-        if not selected:
-            print(" Не удалось выбрать календарь")
-            return
+
 
         cal_name = selected.get('summary', 'Календарь')
         cal_id = selected.get('id')
@@ -260,29 +299,44 @@ def main():
         week_start, _ = get_week_range(0)
         events = get_events(service, cal_id, week_start, week_start + datetime.timedelta(days=30))
         display_events(events[:15], cal_name)
-        
-        # Выводим расписание
-        if SCHEDULE_MODE == 'next':
-            # Только следующая неделя
-            week_start_next, _ = get_week_range(1)
-            schedule = get_week_schedule(service, cal_id, 1)
-            print_weekly_schedule(
-                schedule,
-                week_start_next,
-                f" Свободное время в '{cal_name}' на следующей неделе"
-            )
-        elif SCHEDULE_MODE == 'two_weeks':
-            # Общие окна на следующей неделе и через одну
-            common_windows = find_common_windows_next_and_two_ahead(service, cal_id)
-            if common_windows:
+
+        if SCHEDULE_MODE:  
+            # Выводим расписание
+            if SCHEDULE_MODE == 'next':
+                # Только следующая неделя
                 week_start_next, _ = get_week_range(1)
+                schedule = get_week_schedule(service, cal_id, 1)
                 print_weekly_schedule(
-                    common_windows,
+                    schedule,
                     week_start_next,
-                    f" ОБЩИЕ ОКНА на следующей неделе и через одну (мин. {MIN_FREE_INTERVAL} мин)"
+                    f" Свободное время в '{cal_name}' на следующей неделе"
                 )
-            else:
-                print(f"\n Нет общих окон длительностью {MIN_FREE_INTERVAL}+ минут на двух неделях")
+            elif SCHEDULE_MODE == 'two_weeks':
+                # Общие окна на следующей неделе и через одну
+                common_windows = find_common_windows_next_and_two_ahead(service, cal_id)
+                if common_windows:
+                    week_start_next, _ = get_week_range(1)
+                    print_weekly_schedule(
+                        common_windows,
+                        week_start_next,
+                        f" ОБЩИЕ ОКНА на следующей неделе и через одну (мин. {MIN_FREE_INTERVAL} мин)"
+                    )
+                else:
+                    print(f"\n Нет общих окон длительностью {MIN_FREE_INTERVAL}+ минут на двух неделях")
+        
+        if MUNTH_SUM:
+            month_ru = [
+                "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+                "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+            ]
+            month_start, month_end, month = get_month_range()
+            events = get_events(service, cal_id, month_start, month_end)
+            print(f'Зарплата за {month_ru[month - 1]}: {salary(events)}')
+
+            now = datetime.datetime.now().astimezone()
+            events = get_events(service, cal_id, month_start, now)
+            print(f'Зарплата факт {month_ru[month - 1]}: {salary(events)}')
+
     except Exception as e:
         print(f"\n Ошибка: {e}")
 
